@@ -1,22 +1,347 @@
-### AL ###
-#Template for AL projects for Dynamics 365 Business Central
-#launch.json folder
-.vscode/
-#Cache folder
-.alcache/
-#Symbols folder
-.alpackages/
-#Snapshots folder
-.snapshots/
-#Testing Output folder
-.output/
-#Extension App-file
-*.app
-#Rapid Application Development File
-rad.json
-#Translation Base-file
-*.g.xlf
-#License-file
-*.flf
-#Test results file
-TestResults.xml
+import os
+import pandas as pd
+import numpy as np
+import cv2
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+from sklearn.metrics import confusion_matrix,classification_report
+import matplotlib.pyplot as plt
+import seaborn as sns
+def relu( z : np.ndarray ) -> np.ndarray :
+       """ Apply the ReLU activation function to each element in the input array .
+       Parameters :
+           arr (np.ndarray ): Input array of any shape .
+       Returns :
+           np.ndarray : Array with ReLU applied , same shape as input .
+       """
+       assert isinstance ( z , np.ndarray ) , " Input must be a NumPy ndarray "
+       assert z.size > 0, " Input array cannot be empty "
+       result = np.maximum (0 ,z )
+       assert isinstance ( result , np.ndarray ) , " Output must be a NumPy ndarray "
+       assert result . shape == z.shape , " Output shape must match input shape "
+       assert np.all( result >= 0) , " ReLU output must be non - negative "
+       return result
+
+def relu_derivative ( z : np.ndarray ) -> np.ndarray :
+      """ Apply the  derivation of ReLU activation function to each element in the input array .
+      Parameters :
+          arr (np.ndarray ): Input array of any shape .
+      Returns :
+         np.ndarray : Array with ReLU applied , same shape as input .
+      """
+      assert isinstance ( z , np.ndarray ) , " Input must be a NumPy ndarray "
+      assert z.size > 0, " Input array cannot be empty "
+      result =np . where (z > 0 , 1, 0) 
+      assert isinstance ( result , np.ndarray ) , " Output must be a NumPy ndarray "
+      assert result . shape == z.shape , " Output shape must match input shape "
+      assert np.all( result >= 0) , " ReLU output must be non - negative "
+      assert np.all(( result == 0 )|( result == 1 )) ,"seuil output must be 0 or 1"
+      return  result   
+def softmax(x):
+    assert isinstance(x, np.ndarray), "Input to softmax must be a numpy array"
+    exp_x = np.exp(x-np.max(x, axis=1,keepdims=True))
+    result = exp_x / np.sum(exp_x, axis=1, keepdims=True)
+    assert np.all((result >= 0) & (result <= 1)), "Softmax output must be in [0, 1]"
+    assert np.allclose(np.sum(result, axis=1), 1), "Softmax output must sum to 1 per sample"
+    return result
+class MultiClassNeuralNetwork:
+     def __init__(self, layer_sizes, learning_rate=0.01):
+         """
+         Initialize the neural network with given layer sizes and learning rate.
+         layer_sizes: List of integers [input_size, hidden1_size,..., output_size]
+         """
+         assert isinstance(layer_sizes, list) and len(layer_sizes) >= 2, "layer_sizes must be a list with at least 2 elements"
+         assert all(isinstance(size, int) and size > 0 for size in layer_sizes), "All layer sizes must be positive integers"
+         assert isinstance(learning_rate, (int, float)) and learning_rate > 0, "Learning rate must be a positive number"
+         self.layer_sizes = layer_sizes
+         self.learning_rate = learning_rate
+         self.weights = []
+         self.biases = []
+         # Initialisation des poids et biais
+         np.random.seed(42)
+         for i in range(len(layer_sizes)- 1):
+             w = np.random.randn(layer_sizes[i], layer_sizes[i+1]) * np.sqrt(2 / layer_sizes[i])
+             b = np.zeros((1, layer_sizes[i+1]))
+             assert w.shape == (layer_sizes[i], layer_sizes[i+1]), f"Weight matrix {i+1} has incorrect shape"
+             assert b.shape == (1, layer_sizes[i+1]), f"Bias vector {i+1} has incorrect shape"
+             self.weights.append(w)
+             self.biases.append(b)
+    
+     def forward(self, X):
+            """
+            Forward propagation with two hidden layers:
+            Layer 1: relu
+            Layer 2: relu
+            Output layer: softmax
+            """
+            assert isinstance(X, np.ndarray), "Input X must be a numpy array"
+            assert X.shape[1] == self.layer_sizes[0], f"Input dimension ({X.shape[1]}) must match input layer size ({self.layer_sizes[0]})"
+            
+            self.activations = [X]
+            self.z_values = []
+        # Première couche cachée : sigmoid
+            z1 = np.dot(self.activations[-1], self.weights[0]) + self.biases[0]
+            assert z1.shape == (X.shape[0], self.layer_sizes[1]), "Z1 has incorrect shape"
+            a1 = relu(z1)
+            self.z_values.append(z1)
+            self.activations.append(a1)
+        
+            # Deuxième couche cachée : ReLU
+            z2 = np.dot(self.activations[-1], self.weights[1]) + self.biases[1]
+            assert z2.shape == (X.shape[0], self.layer_sizes[2]), "Z2 has incorrect shape"
+            a2 = relu(z2)
+            self.z_values.append(z2)
+            self.activations.append(a2)
+        
+            # Couche de sortie : sigmoid
+            z3 = np.dot(self.activations[-1], self.weights[2]) + self.biases[2]
+            assert z3.shape == (X.shape[0], self.layer_sizes[3]), "Output Z has incorrect shape"
+            output = softmax(z3)
+            self.z_values.append(z3)
+            self.activations.append(output)
+            return output
+     def compute_loss(self, y_true, y_pred):
+            """
+            Categorical Cross-Entropy: J = -1/m * sum(y_true * log(y_pred))
+            """
+            assert isinstance(y_true, np.ndarray) and isinstance(y_pred, np.ndarray), \
+                "Inputs to loss must be numpy arrays"
+  assert y_true.shape == y_pred.shape, "y_true and y_pred must have the same shape"
+            y_pred = np.clip(y_pred, 1e-15, 1 - 1e-15)
+            # Nombre d'exemples
+            m = y_true.shape[0]
+            # Calcul de la perte
+            loss = -np.sum(y_true * np.log(y_pred)) / m
+            assert not np.isnan(loss), "Loss computation resulted in NaN"
+            return loss
+     def compute_accuracy(self, y_true, y_pred):
+            """
+            Compute accuracy: proportion of correct predictions
+            """
+            assert isinstance(y_true, np.ndarray) and isinstance(y_pred, np.ndarray), "Inputs to accuracy must be numpy arrays"
+            assert y_true.shape == y_pred.shape, "y_true and y_pred must have the same shape"
+            accuracy = np.sum(y_true == y_pred) / y_true.size
+            assert 0 <= accuracy <= 1, "Accuracy must be between 0 and 1"
+            return accuracy
+    
+     def backward(self, X, y, outputs):
+            """
+            Backpropagation: compute gradients dW^[l], db^[l] for each layer
+            """
+            assert isinstance(X, np.ndarray) and isinstance(y, np.ndarray) and isinstance(outputs, np.ndarray),"Inputs to backward must be numpy arrays"
+            assert X.shape[1] == self.layer_sizes[0], f"Input dimension ({X.shape[1]}) must match input layer size ({self.layer_sizes[0]})"
+            assert y.shape == outputs.shape, "y and outputs must have the same shape"
+            m = X.shape[0]  # nombre d'exemples dans le batch
+            # Initialisation des gradients
+            self.d_weights = [np.zeros_like(w) for w in self.weights]
+            self.d_biases = [np.zeros_like(b) for b in self.biases]
+        
+            # Gradient de la couche de sortie (loss dérivée pour softmax + cross-entropy)
+            dZ = outputs - y  # (m, n_classes)
+            assert dZ.shape == outputs.shape, "dZ for output layer has incorrect shape"
+         # Gradient poids et biais couche de sortie
+            self.d_weights[-1] = (self.activations[-2].T @ dZ) / m
+            self.d_biases[-1] = np.sum(dZ, axis=0, keepdims=True) / m
+        
+            # Rétropropagation vers les couches cachées
+            for i in range(len(self.weights) - 2, -1, -1):
+                # Gradient propagation à travers couche précédente
+                dA = dZ @ self.weights[i+1].T
+        
+                # Dérivée de ReLU
+                dZ = dA * (self.activations[i+1] > 0)
+        
+                # Calcul gradients poids et biais
+                self.d_weights[i] = (self.activations[i].T @ dZ) / m
+                self.d_biases[i] = np.sum(dZ, axis=0, keepdims=True) / m
+     def update_parameters(self):
+                """
+                Mise à jour des poids et biais avec les gradients calculés en backward,
+                selon le taux d'apprentissage (self.learning_rate).
+                """
+                for i in range(len(self.weights)):
+                    self.weights[i] -= self.learning_rate * self.d_weights[i]
+                    self.biases[i] -= self.learning_rate * self.d_biases[i]
+     def train(self, X, y, X_val, y_val, epochs, batch_size):
+            """
+            Train the neural network using mini-batch SGD, with validation
+            """
+            assert isinstance(X, np.ndarray) and isinstance(y, np.ndarray), "X and y must be numpy arrays"
+            assert isinstance(X_val, np.ndarray) and isinstance(y_val, np.ndarray), "X_val and y_val must be numpy arrays"
+            assert X.shape[1] == self.layer_sizes[0], f"Input dimension ({X.shape[1]}) must match input layer size ({self.layer_sizes[0]})"
+            assert y.shape[1] == self.layer_sizes[-1], f"Output dimension ({y.shape[1]}) must match output layer size ({self.layer_sizes[-1]})"
+            assert X_val.shape[1] == self.layer_sizes[0], f"Validation input dimension ({X_val.shape[1]}) must match input layer size ({self.layer_sizes[0]})"
+            assert y_val.shape[1] == self.layer_sizes[-1], f"Validation output dimension ({y_val.shape[1]}) must match output layer size ({self.layer_sizes[-1]})"
+            assert isinstance(epochs, int) and epochs > 0, "Epochs must be a positive integer"
+            assert isinstance(batch_size, int) and batch_size > 0, "Batch size must be a positive integer"
+ train_losses, val_losses = [], []
+            train_accuracies, val_accuracies = [], []
+            for epoch in range(epochs):
+                # Permutation aléatoire des indices pour le mini-batch
+                indices = np.random.permutation(X.shape[0])
+        
+                epoch_loss = 0
+                for i in range(0, X.shape[0], batch_size):
+                    batch_indices = indices[i:i+batch_size]
+                    X_batch = X[batch_indices]
+                    y_batch = y[batch_indices]
+        
+                  
+                    outputs = self.forward(X_batch)
+                    loss = self.compute_loss(y_batch, outputs)
+                    epoch_loss += loss * X_batch.shape[0]  # Somme pondérée par taille batch
+        
+                    self.backward(X_batch, y_batch, outputs)
+                    self.update_parameters()  # à implémenter : gradient step avec learning rate
+                    # Moyenne des pertes sur tout l'époch
+                train_loss = epoch_loss / X.shape[0]
+                # Calcul des métriques sur train et val complet
+                train_outputs = self.forward(X)
+                train_accuracy = self.compute_accuracy(y, (train_outputs > 0.5).astype(int))
+        
+                val_outputs = self.forward(X_val)
+                val_loss = self.compute_loss(y_val, val_outputs)
+                val_accuracy = self.compute_accuracy(y_val, (val_outputs > 0.5).astype(int))
+                train_losses.append(train_loss)
+                val_losses.append(val_loss)
+                train_accuracies.append(train_accuracy)
+                val_accuracies.append(val_accuracy)
+ if epoch % 10 == 0:
+                    print(f"Epoch {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, "
+                          f"Train Acc: {train_accuracy:.4f}, Val Acc: {val_accuracy:.4f}")
+        
+            return train_losses, val_losses, train_accuracies, val_accuracies
+     def predict(self, X):
+                """
+                Predict class labels (0 or 1)
+                """
+                assert isinstance(X, np.ndarray), "Input X must be a numpy array"
+                assert X.shape[1] == self.layer_sizes[0], f"Input dimension ({X.shape[1]}) must match input layer size ({self.layer_sizes[0]})"
+                outputs = self.forward(X)  # Sorties du réseau (probabilités)
+                # Pour classification binaire : prédiction 0 ou 1 selon seuil 0.5
+                predictions = (outputs > 0.5).astype(int)
+                assert predictions.shape == (X.shape[0], self.layer_sizes[-1]), "Predictions have incorrect shape"
+                return predictions
+data=r'C:\Users\PC\Desktop\amhcd-data-64\tifinagh-images'
+print(f"Dossier de données : {data}")
+
+# Tenter de charger le fichier CSV avec les étiquettes
+try:
+    labels_df = pd.read_csv(os.path.join(data,'labels-map.csv'))
+    assert 'image_path' in labels_df.columns and 'label' in labels_df.columns, "CSV must contain 'image_path' and 'label'"
+except FileNotFoundError:
+    print("labels-map.csv not found. Using folder structure instead.")
+    image_paths = []
+    labels = []
+    for label_dir in os.listdir(data):
+        label_path = os.path.join(data, label_dir)
+        if os.path.isdir(label_path):
+            for img_name in os.listdir(label_path):
+                image_paths.append(os.path.join(label_dir, img_name))
+                labels.append(label_dir)
+    labels_df = pd.DataFrame({'image_path': image_paths, 'label': labels})
+# Vérification
+assert not labels_df.empty, "No data loaded. Check dataset files."
+print(f"Loaded {len(labels_df)} samples with {labels_df['label'].nunique()} unique classes.")
+
+# Encodage des étiquettes
+label_encoder = LabelEncoder()
+labels_df['label_encoded'] = label_encoder.fit_transform(labels_df['label'])
+num_classes = len(label_encoder.classes_)
+
+# Fonction de chargement et prétraitement des images
+def load_and_preprocess_image(image_path, target_size=(32, 32)):
+    full_path = os.path.join(data, image_path)
+    assert os.path.exists(full_path), f"Image not found: {full_path}"
+    img = cv2.imread(full_path, cv2.IMREAD_GRAYSCALE)
+    assert img is not None, f"Failed to load image: {full_path}"
+    img = cv2.resize(img, target_size)
+    img = img.astype(np.float32) / 255.0
+    return img.flatten()
+
+# Chargement de toutes les images
+X = np.array([load_and_preprocess_image(path) for path in labels_df['image_path']])
+y = labels_df['label_encoded'].values
+
+# Vérification des dimensions
+assert X.shape[0] == y.shape[0], "Mismatch between number of images and labels"
+assert X.shape[1] == 32 * 32, f"Expected 1024 features, got {X.shape[1]}"
+
+# Division des données : 60% train, 20% val, 20% test
+X_temp, X_test, y_temp, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X_temp, y_temp, test_size=0.25, stratify=y_temp, random_state=42)
+# Encodage One-Hot
+one_hot_encoder = OneHotEncoder(sparse_output=False)
+y_train_one_hot = one_hot_encoder.fit_transform(y_train.reshape(-1, 1))
+y_val_one_hot = one_hot_encoder.transform(y_val.reshape(-1, 1))
+y_test_one_hot = one_hot_encoder.transform(y_test.reshape(-1, 1))
+
+# Vérification
+assert isinstance(y_train_one_hot, np.ndarray)
+assert isinstance(y_val_one_hot, np.ndarray)
+assert isinstance(y_test_one_hot, np.ndarray)
+
+print(f"Train: {X_train.shape[0]} samples, Validation: {X_val.shape[0]} samples, Test: {X_test.shape[0]} samples")
+# Architecture du réseau : 1024 -> 64 -> 32 -> 33
+layer_sizes = [X_train.shape[1], 64, 32, num_classes]  # 64 et 32 neurones cachés, 33 classes
+nn = MultiClassNeuralNetwork(layer_sizes, learning_rate=0.01)
+
+# Entraînement
+train_losses, val_losses, train_accuracies, val_accuracies = nn.train(
+    X_train, y_train_one_hot,
+    X_val, y_val_one_hot,
+    epochs=100,
+    batch_size=32
+)
+
+# Évaluation sur le jeu de test
+y_pred = nn.predict(X_test)
+if len(y_test.shape) > 1 and y_test.shape[1] > 1:
+    y_test_decoded = np.argmax(y_test, axis=1)
+else:
+    y_test_decoded = y_test
+
+# Convertir y_pred en entier si nécessaire (ça ne devrait pas être le cas, mais on vérifie)
+if len(y_pred.shape) > 1 and y_pred.shape[1] > 1:
+  y_pred_decoded = np.argmax(y_pred, axis=1)
+else:
+    y_pred_decoded = y_pred
+
+# Vérifier les formes
+print("y_test_decoded.shape :", y_test_decoded.shape)
+print("y_pred_decoded.shape :", y_pred_decoded.shape)
+# Rapport de classification
+print("\nRapport de classification (jeu de test) :")
+print(classification_report(y_test_decoded, y_pred_decoded, target_names=label_encoder.classes_))
+# Matrice de confusion
+cm =confusion_matrix(y_test_decoded, y_pred_decoded)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Matrice de confusion (jeu de test)')
+plt.xlabel('Prédit')
+plt.ylabel('Réel')
+plt.savefig('confusion_matrix.png')
+plt.show()
+
+# Courbes de perte et de précision
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+# Courbe de perte
+ax1.plot(train_losses, label='Train Loss')
+ax1.plot(val_losses, label='Validation Loss')
+ax1.set_title('Courbe de perte')
+ax1.set_xlabel('Époque')
+ax1.set_ylabel('Perte')
+ax1.legend()
+
+# Courbe de précision
+ax2.plot(train_accuracies, label='Train Accuracy')
+ax2.plot(val_accuracies, label='Validation Accuracy')
+ax2.set_title('Courbe de précision')
+ax2.set_xlabel('Époque')
+ax2.set_ylabel('Précision')
+ax2.legend()
+
+plt.tight_layout()
+fig.savefig('loss_accuracy_plot.png')
+plt.show()
